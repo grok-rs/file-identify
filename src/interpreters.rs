@@ -3,7 +3,7 @@ use phf::phf_map;
 
 // Interpreter mappings using Perfect Hash Functions for compile-time optimization.
 
-static INTERPRETER_TAGS: phf::Map<&'static str, &'static [&'static str]> = phf_map! {
+pub static INTERPRETER_TAGS: phf::Map<&'static str, &'static [&'static str]> = phf_map! {
     "ash" => &["shell", "ash"],
     "awk" => &["awk"],
     "bash" => &["shell", "bash"],

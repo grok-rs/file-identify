@@ -1,6 +1,6 @@
 [package]
 name = "file-identify"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Serhii Kaliuzhnyi <https://github.com/grok-rs>"]
 description = "File identification library for Rust - detects file types based on extensions, shebangs, and content"
