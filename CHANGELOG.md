@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-05
+
+### Added
+- I/O-free identification API: `FileInfo`, `FileKind`, `tags_from_info`, `FileIdentifier::identify_from`
+- Renovate configuration for automated dependency updates
+- CI: MSRV check, cargo-deny audit, docs build, rust-cache, feature matrix testing
+
+### Changed
+- **Breaking**: MSRV bumped from 1.85 to 1.94
+- `clap` is now optional behind the `cli` feature (`cargo install file-identify --features cli`)
+- Replaced `once_cell::sync::Lazy` with `std::sync::LazyLock`
+- Replaced per-call `HashSet<u8>` in `is_text()` with compile-time `const` lookup table
+- Modernized code with let chains, `HashSet::from()`, `.copied()`, `.first()`
+- Simplified release pipeline and config files
+
+### Removed
+- `serde` and `serde_json` from library dependencies (CLI uses manual JSON formatting)
+- `once_cell` dependency (replaced by std)
+- `.secrets.baseline` and `detect-secrets` pre-commit hook
+
 ## [0.2.0] - 2025-08-08
 
 ### Changed
@@ -70,7 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container formats: Docker, Podman, etc.
 - And 300+ more file types and extensions
 
-[Unreleased]: https://github.com/grok-rs/file-identify/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/grok-rs/file-identify/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/grok-rs/file-identify/releases/tag/v0.3.0
 [0.2.0]: https://github.com/grok-rs/file-identify/releases/tag/v0.2.0
 [0.1.1]: https://github.com/grok-rs/file-identify/releases/tag/v0.1.1
 [0.1.0]: https://github.com/grok-rs/file-identify/releases/tag/v0.1.0

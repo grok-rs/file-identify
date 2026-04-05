@@ -1,124 +1,110 @@
 # file-identify
 
 [![Crates.io](https://img.shields.io/crates/v/file-identify.svg)](https://crates.io/crates/file-identify)
-[![Documentation](https://docs.rs/file-identify/badge.svg)](https://docs.rs/file-identify)
+[![docs.rs](https://docs.rs/file-identify/badge.svg)](https://docs.rs/file-identify)
 [![CI](https://github.com/grok-rs/file-identify/workflows/CI/badge.svg)](https://github.com/grok-rs/file-identify/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/badge/MSRV-1.94.0-blue.svg)](https://blog.rust-lang.org/)
 
-File identification library for Rust.
+A Rust library for identifying file types based on extensions, content, and shebangs.
 
-Given a file (or some information about a file), return a set of standardized tags identifying what the file is.
+Given a file (or pre-loaded file information), returns a set of standardized tags
+identifying what the file is. Supports 315+ file types with compile-time optimized
+lookups via [PHF](https://crates.io/crates/phf).
 
-This is a Rust port of the Python [identify](https://github.com/pre-commit/identify) library.
+Rust port of the Python [identify](https://github.com/pre-commit/identify) library.
 
-## Features
-
-- 🚀 **Fast**: Built in Rust with Perfect Hash Functions (PHF) for compile-time optimization
-- 📁 **Comprehensive**: Identifies 315+ file types and formats
-- 🔍 **Smart detection**: Uses file extensions, content analysis, and shebang parsing
-- 📦 **Library + CLI**: Use as a Rust library or command-line tool
-- ⚡ **Zero overhead**: PHF provides O(1) lookups with no runtime hash computation
-- 🎯 **Memory efficient**: Static data structures with no lazy initialization
-- ✅ **Well-tested**: Extensive test suite ensuring reliability
-
-## Installation
-
-Add this to your `Cargo.toml`:
+## Quick start
 
 ```toml
 [dependencies]
-file-identify = "0.2.0"
+file-identify = "0.3"
 ```
-
-## Usage
-
-### Library Usage
 
 ```rust
-use file_identify::{tags_from_path, tags_from_filename, tags_from_interpreter};
+use file_identify::{tags_from_path, tags_from_filename};
 
-// Identify a file from its path
-let tags = tags_from_path("/path/to/file.py").unwrap();
-println!("{:?}", tags); // {"file", "text", "python", "non-executable"}
+// Full identification from a filesystem path
+let tags = tags_from_path("src/main.rs").unwrap();
+assert!(tags.contains("file"));
+assert!(tags.contains("rust"));
+assert!(tags.contains("text"));
 
-// Identify from filename only
-let tags = tags_from_filename("script.sh");
-println!("{:?}", tags); // {"text", "shell", "bash"}
-
-// Identify from interpreter
-let tags = tags_from_interpreter("python3");
-println!("{:?}", tags); // {"python", "python3"}
+// Filename-only identification (no I/O)
+let tags = tags_from_filename("Dockerfile");
+assert!(tags.contains("dockerfile"));
 ```
 
-### Command Line Usage
+## I/O-free identification
 
-```bash
-# Install the CLI tool
-cargo install file-identify
+For use with mocked or virtual filesystems (e.g., in tests), `tags_from_info`
+accepts pre-loaded file data with no filesystem access:
 
-# Identify a file
-file-identify setup.py
-["file", "non-executable", "python", "text"]
+```rust
+use file_identify::{tags_from_info, FileInfo, FileKind};
 
-# Use filename only (don't read file contents)
-file-identify --filename-only setup.py
-["python", "text"]
+let info = FileInfo {
+    filename: "script.py",
+    file_kind: FileKind::Regular,
+    is_executable: false,
+    content: Some(b"print('hello')"),
+};
+let tags = tags_from_info(&info);
+assert!(tags.contains("python"));
+assert!(tags.contains("text"));
+```
 
-# Get help
-file-identify --help
+The `FileIdentifier` builder works with both paths and `FileInfo`:
+
+```rust
+use file_identify::FileIdentifier;
+
+let id = FileIdentifier::new()
+    .skip_content_analysis()
+    .skip_shebang_analysis();
+
+let tags = id.identify("src/main.rs").unwrap();
+// Or: id.identify_from(&info);
 ```
 
 ## How it works
 
 A call to `tags_from_path` does this:
 
-1. What is the type: file, symlink, directory? If it's not file, stop here.
-2. Is it executable? Add the appropriate tag.
-3. Do we recognize the file extension? If so, add the appropriate tags, stop here. These tags would include binary/text.
-4. Peek at the first 1KB of the file. Use these to determine whether it is binary or text, add the appropriate tag.
-5. If identified as text above, try to read and interpret the shebang, and add appropriate tags.
+1. Checks the file type (file, symlink, directory, socket). If not a regular file, stop.
+2. Checks permissions and adds `executable` or `non-executable`.
+3. Matches the filename or extension. If recognized, adds tags (including `text`/`binary`) and stops.
+4. Reads the first 1KB to determine `text` or `binary`.
+5. For text executables, parses the shebang to identify the interpreter.
 
-By design, this means we don't need to partially read files where we recognize the file extension.
+By design, recognized extensions skip file reads entirely.
 
-## Development
+## CLI
 
-### Setup
-
-```bash
-# Clone the repository
-git clone git@github.com:grok-rs/file-identify.git
-cd file-identify
-
-# Build the project
-cargo build
-
-# Run tests
-cargo test
-
-# Run the CLI
-cargo run -- path/to/file
-```
-
-### Pre-commit hooks
-
-This project uses pre-commit hooks to ensure code quality:
+The CLI is behind the `cli` feature to keep the library dependency-free of `clap`:
 
 ```bash
-pip install pre-commit
-pre-commit install
+cargo install file-identify --features cli
+
+file-identify src/main.rs
+# ["file", "non-executable", "rust", "text"]
+
+file-identify --filename-only Cargo.toml
+# ["cargo", "text", "toml"]
 ```
 
-### Testing
+## Tag categories
 
-```bash
-# Run all tests
-cargo test
+| Category | Tags |
+|----------|------|
+| Type | `file`, `directory`, `symlink`, `socket` |
+| Mode | `executable`, `non-executable` |
+| Encoding | `text`, `binary` |
+| Language | `python`, `rust`, `javascript`, `c++`, ... (315+ types) |
 
-# Run with coverage (requires cargo-tarpaulin)
-cargo install cargo-tarpaulin
-cargo tarpaulin --out html
-```
+## Minimum supported Rust version
 
+The MSRV is **1.94.0** and is checked in CI.
 
 ## License
 

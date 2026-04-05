@@ -140,7 +140,7 @@ checksum = "a043dc74da1e37d6afe657061213aa6f425f855399a11d3463c6ecccc4dfda1f"
 
 [[package]]
 name = "file-identify"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "phf",
