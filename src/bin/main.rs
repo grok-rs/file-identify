@@ -17,6 +17,11 @@ struct Args {
     path: String,
 }
 
+fn tags_to_json(tags: &[&str]) -> String {
+    let inner: Vec<String> = tags.iter().map(|t| format!("\"{t}\"")).collect();
+    format!("[{}]", inner.join(", "))
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -37,12 +42,8 @@ fn main() {
     }
 
     // Sort tags for consistent output
-    let mut sorted_tags: Vec<&str> = tags.iter().cloned().collect();
+    let mut sorted_tags: Vec<&str> = tags.iter().copied().collect();
     sorted_tags.sort();
 
-    // Output as JSON array (matching Python version behavior)
-    match serde_json::to_string(&sorted_tags) {
-        Ok(json) => println!("{json}"),
-        Err(_) => process::exit(1),
-    }
+    println!("{}", tags_to_json(&sorted_tags));
 }

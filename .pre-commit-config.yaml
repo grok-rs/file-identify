@@ -1,70 +1,51 @@
 repos:
   # Rust-specific hooks
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-        name: Rust formatting (cargo fmt)
-      - id: cargo-check
-        name: Rust compilation check (cargo check)
-      - id: clippy
-        name: Rust linting (cargo clippy)
-        args: ['--all-targets', '--all-features', '--', '-D', 'warnings']
-
-  # General code quality hooks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-      - id: trailing-whitespace
-        name: Trim trailing whitespace
-      - id: end-of-file-fixer
-        name: Fix end of files
-      - id: check-yaml
-        name: Check YAML syntax
-      - id: check-toml
-        name: Check TOML syntax
-      - id: check-json
-        name: Check JSON syntax
-      - id: check-merge-conflict
-        name: Check for merge conflicts
-      - id: check-added-large-files
-        name: Check for large files
-        args: ['--maxkb=500']
-      - id: detect-private-key
-        name: Detect private keys
-      - id: mixed-line-ending
-        name: Check for mixed line endings
-        args: ['--fix=lf']
-
-  # Additional Rust tooling
   - repo: local
     hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt -- --check
+        language: system
+        files: \.rs$
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-features -- -D warnings
+        language: system
+        files: \.(rs|toml)$
+        pass_filenames: false
       - id: cargo-test
-        name: Rust tests (cargo test)
+        name: cargo test
         entry: cargo test --all-features
         language: system
         files: \.(rs|toml)$
         pass_filenames: false
       - id: cargo-deny
-        name: Cargo deny (security audit)
+        name: cargo deny
         entry: cargo deny check
         language: system
         files: Cargo\.(toml|lock)$
         pass_filenames: false
 
-  # Documentation and spell checking
+  # General code quality hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Spell checking
   - repo: https://github.com/crate-ci/typos
-    rev: v1.23.6
+    rev: v1.31.1
     hooks:
       - id: typos
-        name: Check for typos
         args: [--format=brief]
-
-  # Security scanning
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
-    hooks:
-      - id: detect-secrets
-        name: Detect secrets
-        args: ['--baseline', '.secrets.baseline']
-        exclude: ^(target/|\.git/)

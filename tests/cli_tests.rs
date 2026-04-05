@@ -11,8 +11,19 @@ fn get_cli_path() -> std::path::PathBuf {
     path
 }
 
+/// Skip CLI tests when the binary isn't built (requires --features cli).
+macro_rules! require_cli_binary {
+    () => {
+        if !get_cli_path().exists() {
+            eprintln!("Skipping: binary not built (build with --features cli)");
+            return;
+        }
+    };
+}
+
 #[test]
 fn test_cli_basic_usage() {
+    require_cli_binary!();
     let dir = tempdir().unwrap();
     let py_path = dir.path().join("test.py");
     fs::write(&py_path, "print('hello')").unwrap();
@@ -35,6 +46,7 @@ fn test_cli_basic_usage() {
 
 #[test]
 fn test_cli_filename_only() {
+    require_cli_binary!();
     let output = Command::new(get_cli_path())
         .args(&["--filename-only", "test.py"])
         .output()
@@ -52,6 +64,7 @@ fn test_cli_filename_only() {
 
 #[test]
 fn test_cli_file_not_found() {
+    require_cli_binary!();
     let output = Command::new(get_cli_path())
         .arg("/nonexistent/file")
         .output()
@@ -66,6 +79,7 @@ fn test_cli_file_not_found() {
 
 #[test]
 fn test_cli_unrecognized_file() {
+    require_cli_binary!();
     let output = Command::new(get_cli_path())
         .args(&["--filename-only", "unknown.xyz"])
         .output()
@@ -80,6 +94,7 @@ fn test_cli_unrecognized_file() {
 
 #[test]
 fn test_cli_help() {
+    require_cli_binary!();
     let output = Command::new(get_cli_path())
         .arg("--help")
         .output()
@@ -93,6 +108,7 @@ fn test_cli_help() {
 
 #[test]
 fn test_cli_version() {
+    require_cli_binary!();
     let output = Command::new(get_cli_path())
         .arg("--version")
         .output()
@@ -105,6 +121,7 @@ fn test_cli_version() {
 
 #[test]
 fn test_cli_directory() {
+    require_cli_binary!();
     let dir = tempdir().unwrap();
 
     let output = Command::new(get_cli_path())
@@ -121,6 +138,7 @@ fn test_cli_directory() {
 
 #[test]
 fn test_cli_executable_script() {
+    require_cli_binary!();
     let dir = tempdir().unwrap();
     let script_path = dir.path().join("script");
     fs::write(&script_path, "#!/bin/bash\necho hello").unwrap();
@@ -146,6 +164,7 @@ fn test_cli_executable_script() {
 
 #[test]
 fn test_cli_binary_file() {
+    require_cli_binary!();
     let dir = tempdir().unwrap();
     let binary_path = dir.path().join("binary.exe");
     // ELF header

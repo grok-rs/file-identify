@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 pub const DIRECTORY: &str = "directory";
 pub const SYMLINK: &str = "symlink";
@@ -15,13 +15,14 @@ pub type TagSet = HashSet<&'static str>;
 /// Helper function to convert a static array of tags to a TagSet.
 #[inline]
 pub fn tags_from_array(tags: &[&'static str]) -> TagSet {
-    tags.iter().cloned().collect()
+    tags.iter().copied().collect()
 }
 
-pub static TYPE_TAGS: Lazy<TagSet> =
-    Lazy::new(|| HashSet::from([DIRECTORY, FILE, SYMLINK, SOCKET]));
-pub static MODE_TAGS: Lazy<TagSet> = Lazy::new(|| HashSet::from([EXECUTABLE, NON_EXECUTABLE]));
-pub static ENCODING_TAGS: Lazy<TagSet> = Lazy::new(|| HashSet::from([BINARY, TEXT]));
+pub static TYPE_TAGS: LazyLock<TagSet> =
+    LazyLock::new(|| HashSet::from([DIRECTORY, FILE, SYMLINK, SOCKET]));
+pub static MODE_TAGS: LazyLock<TagSet> =
+    LazyLock::new(|| HashSet::from([EXECUTABLE, NON_EXECUTABLE]));
+pub static ENCODING_TAGS: LazyLock<TagSet> = LazyLock::new(|| HashSet::from([BINARY, TEXT]));
 
 /// Check if a tag is a file type tag (optimized with pattern matching)
 pub fn is_type_tag(tag: &str) -> bool {
@@ -36,4 +37,13 @@ pub fn is_mode_tag(tag: &str) -> bool {
 /// Check if a tag is an encoding tag (optimized with pattern matching)
 pub fn is_encoding_tag(tag: &str) -> bool {
     matches!(tag, BINARY | TEXT)
+}
+
+/// The kind of filesystem entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileKind {
+    Regular,
+    Directory,
+    Symlink,
+    Socket,
 }

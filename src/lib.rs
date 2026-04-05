@@ -185,7 +185,41 @@ impl Default for ShebangTuple {
 
 use extensions::{get_extension_tags, get_extensions_need_binary_check_tags, get_name_tags};
 use interpreters::get_interpreter_tags;
+pub use tags::FileKind;
 use tags::*;
+
+/// Pre-loaded file information for I/O-free identification.
+///
+/// Use this when you have file data from a source other than the host
+/// filesystem (e.g., a mocked/virtual filesystem in tests).
+///
+/// # Examples
+///
+/// ```rust
+/// use file_identify::{tags_from_info, FileInfo, FileKind};
+///
+/// let info = FileInfo {
+///     filename: "script.py",
+///     file_kind: FileKind::Regular,
+///     is_executable: false,
+///     content: Some(b"print('hello')"),
+/// };
+/// let tags = tags_from_info(&info);
+/// assert!(tags.contains("python"));
+/// assert!(tags.contains("text"));
+/// ```
+#[derive(Debug, Clone)]
+pub struct FileInfo<'a> {
+    /// The filename (just the name component, not a full path).
+    pub filename: &'a str,
+    /// The kind of filesystem entry.
+    pub file_kind: FileKind,
+    /// Whether the file has executable permissions.
+    pub is_executable: bool,
+    /// Optional file content for shebang and encoding analysis.
+    /// Pass `None` to skip content-based analysis entirely.
+    pub content: Option<&'a [u8]>,
+}
 
 /// Configuration for file identification behavior.
 ///
@@ -282,24 +316,83 @@ impl FileIdentifier {
 
         // Step 3: Analyze permissions (executable vs non-executable)
         let is_executable = analyze_permissions(path, &metadata);
-        if is_executable {
-            tags.insert(EXECUTABLE);
+        tags.insert(if is_executable {
+            EXECUTABLE
         } else {
-            tags.insert(NON_EXECUTABLE);
-        }
+            NON_EXECUTABLE
+        });
 
         // Step 4: Analyze filename and potentially shebang (with custom config)
-        let filename_and_shebang_tags =
-            self.analyze_filename_and_shebang_configured(path, is_executable);
-        tags.extend(filename_and_shebang_tags);
+        tags.extend(self.analyze_filename_and_shebang_configured(path, is_executable));
 
         // Step 5: Analyze content encoding (text vs binary) if not skipped and not already determined
         if !self.skip_content_analysis {
-            let encoding_tags = analyze_content_encoding(path, &tags)?;
-            tags.extend(encoding_tags);
+            tags.extend(analyze_content_encoding(path, &tags)?);
         }
 
         Ok(tags)
+    }
+
+    /// Identify a file from pre-loaded information, using configured settings.
+    ///
+    /// This is the pure, I/O-free equivalent of [`FileIdentifier::identify`].
+    /// The caller provides all necessary file data via [`FileInfo`].
+    pub fn identify_from(&self, info: &FileInfo<'_>) -> TagSet {
+        match info.file_kind {
+            FileKind::Directory => return HashSet::from([DIRECTORY]),
+            FileKind::Symlink => return HashSet::from([SYMLINK]),
+            FileKind::Socket => return HashSet::from([SOCKET]),
+            FileKind::Regular => {}
+        }
+
+        let mut tags = TagSet::new();
+        tags.insert(FILE);
+        tags.insert(if info.is_executable {
+            EXECUTABLE
+        } else {
+            NON_EXECUTABLE
+        });
+
+        // Filename analysis with custom extensions support
+        let mut filename_matched = false;
+        if let Some(custom_exts) = &self.custom_extensions
+            && let Some(ext) = Path::new(info.filename)
+                .extension()
+                .and_then(|e| e.to_str())
+            && let Some(ext_tags) = custom_exts.get(&ext.to_lowercase())
+        {
+            tags.extend(ext_tags.iter().copied());
+            filename_matched = true;
+        }
+        if !filename_matched {
+            let filename_tags = tags_from_filename(info.filename);
+            if !filename_tags.is_empty() {
+                tags.extend(filename_tags);
+                filename_matched = true;
+            }
+        }
+
+        // Shebang fallback
+        if !filename_matched
+            && info.is_executable
+            && !self.skip_shebang_analysis
+            && let Some(content) = info.content
+            && let Ok(shebang) = parse_shebang(content)
+            && let Some(interp) = shebang.first()
+        {
+            tags.extend(tags_from_interpreter(interp));
+        }
+
+        // Content encoding
+        if !self.skip_content_analysis
+            && !tags.iter().any(|t| ENCODING_TAGS.contains(t))
+            && let Some(content) = info.content
+            && let Ok(text) = is_text(content)
+        {
+            tags.insert(if text { TEXT } else { BINARY });
+        }
+
+        tags
     }
 
     fn analyze_filename_and_shebang_configured<P: AsRef<Path>>(
@@ -313,14 +406,12 @@ impl FileIdentifier {
         // Check filename-based tags first (including custom extensions)
         if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
             // Check custom extensions first if provided
-            if let Some(custom_exts) = &self.custom_extensions {
-                if let Some(ext) = Path::new(filename).extension().and_then(|e| e.to_str()) {
-                    let ext_lower = ext.to_lowercase();
-                    if let Some(ext_tags) = custom_exts.get(&ext_lower) {
-                        tags.extend(ext_tags.iter().cloned());
-                        return tags; // Custom extension takes precedence
-                    }
-                }
+            if let Some(custom_exts) = &self.custom_extensions
+                && let Some(ext) = Path::new(filename).extension().and_then(|e| e.to_str())
+                && let Some(ext_tags) = custom_exts.get(&ext.to_lowercase())
+            {
+                tags.extend(ext_tags.iter().copied());
+                return tags; // Custom extension takes precedence
             }
 
             // Fall back to standard filename analysis
@@ -329,11 +420,10 @@ impl FileIdentifier {
                 tags.extend(filename_tags);
             } else if is_executable && !self.skip_shebang_analysis {
                 // Parse shebang for executable files without recognized extensions
-                if let Ok(shebang_components) = parse_shebang_from_file(path) {
-                    if !shebang_components.is_empty() {
-                        let interpreter_tags = tags_from_interpreter(&shebang_components[0]);
-                        tags.extend(interpreter_tags);
-                    }
+                if let Ok(shebang_components) = parse_shebang_from_file(path)
+                    && let Some(interp) = shebang_components.first()
+                {
+                    tags.extend(tags_from_interpreter(interp));
                 }
             }
         }
@@ -379,10 +469,10 @@ fn analyze_file_type(metadata: &std::fs::Metadata) -> Option<TagSet> {
     let file_type = metadata.file_type();
 
     if file_type.is_dir() {
-        return Some([DIRECTORY].iter().cloned().collect());
+        return Some(HashSet::from([DIRECTORY]));
     }
     if file_type.is_symlink() {
-        return Some([SYMLINK].iter().cloned().collect());
+        return Some(HashSet::from([SYMLINK]));
     }
 
     // Check for socket (Unix-specific)
@@ -390,7 +480,7 @@ fn analyze_file_type(metadata: &std::fs::Metadata) -> Option<TagSet> {
     {
         use std::os::unix::fs::FileTypeExt;
         if file_type.is_socket() {
-            return Some([SOCKET].iter().cloned().collect());
+            return Some(HashSet::from([SOCKET]));
         }
     }
 
@@ -436,11 +526,10 @@ fn analyze_filename_and_shebang<P: AsRef<Path>>(path: P, is_executable: bool) ->
             tags.extend(filename_tags);
         } else if is_executable {
             // Parse shebang for executable files without recognized extensions
-            if let Ok(shebang_components) = parse_shebang_from_file(path) {
-                if !shebang_components.is_empty() {
-                    let interpreter_tags = tags_from_interpreter(&shebang_components[0]);
-                    tags.extend(interpreter_tags);
-                }
+            if let Ok(shebang_components) = parse_shebang_from_file(path)
+                && let Some(interp) = shebang_components.first()
+            {
+                tags.extend(tags_from_interpreter(interp));
             }
         }
     }
@@ -530,21 +619,100 @@ pub fn tags_from_path<P: AsRef<Path>>(path: P) -> Result<TagSet> {
 
     // Step 3: Analyze permissions (executable vs non-executable)
     let is_executable = analyze_permissions(path, &metadata);
-    if is_executable {
-        tags.insert(EXECUTABLE);
+    tags.insert(if is_executable {
+        EXECUTABLE
     } else {
-        tags.insert(NON_EXECUTABLE);
-    }
+        NON_EXECUTABLE
+    });
 
     // Step 4: Analyze filename and potentially shebang
-    let filename_and_shebang_tags = analyze_filename_and_shebang(path, is_executable);
-    tags.extend(filename_and_shebang_tags);
+    tags.extend(analyze_filename_and_shebang(path, is_executable));
 
     // Step 5: Analyze content encoding (text vs binary) if not already determined
-    let encoding_tags = analyze_content_encoding(path, &tags)?;
-    tags.extend(encoding_tags);
+    tags.extend(analyze_content_encoding(path, &tags)?);
 
     Ok(tags)
+}
+
+/// Identify a file from pre-loaded information, without any I/O.
+///
+/// This is the pure equivalent of [`tags_from_path`]. The caller provides
+/// all necessary file data upfront via [`FileInfo`], making it usable with
+/// mocked or virtual filesystems.
+///
+/// # Arguments
+///
+/// * `info` - Pre-loaded file information
+///
+/// # Returns
+///
+/// A set of tags identifying the file type and characteristics.
+///
+/// # Examples
+///
+/// ```rust
+/// use file_identify::{tags_from_info, FileInfo, FileKind};
+///
+/// let info = FileInfo {
+///     filename: "script.py",
+///     file_kind: FileKind::Regular,
+///     is_executable: false,
+///     content: Some(b"print('hello')"),
+/// };
+/// let tags = tags_from_info(&info);
+/// assert!(tags.contains("file"));
+/// assert!(tags.contains("python"));
+/// assert!(tags.contains("text"));
+///
+/// // Directories return just the type tag
+/// let info = FileInfo {
+///     filename: "src",
+///     file_kind: FileKind::Directory,
+///     is_executable: false,
+///     content: None,
+/// };
+/// let tags = tags_from_info(&info);
+/// assert!(tags.contains("directory"));
+/// ```
+pub fn tags_from_info(info: &FileInfo<'_>) -> TagSet {
+    match info.file_kind {
+        FileKind::Directory => return HashSet::from([DIRECTORY]),
+        FileKind::Symlink => return HashSet::from([SYMLINK]),
+        FileKind::Socket => return HashSet::from([SOCKET]),
+        FileKind::Regular => {}
+    }
+
+    let mut tags = TagSet::new();
+    tags.insert(FILE);
+    tags.insert(if info.is_executable {
+        EXECUTABLE
+    } else {
+        NON_EXECUTABLE
+    });
+
+    // Filename/extension matching
+    let filename_tags = tags_from_filename(info.filename);
+    if !filename_tags.is_empty() {
+        tags.extend(filename_tags);
+    } else if info.is_executable {
+        // Shebang fallback for executables without recognized extension
+        if let Some(content) = info.content
+            && let Ok(shebang) = parse_shebang(content)
+            && let Some(interp) = shebang.first()
+        {
+            tags.extend(tags_from_interpreter(interp));
+        }
+    }
+
+    // Content encoding (text vs binary) if not already determined
+    if !tags.iter().any(|tag| ENCODING_TAGS.contains(tag))
+        && let Some(content) = info.content
+        && let Ok(text) = is_text(content)
+    {
+        tags.insert(if text { TEXT } else { BINARY });
+    }
+
+    tags
 }
 
 /// Identify a file based only on its filename.
@@ -724,23 +892,36 @@ pub fn file_is_text<P: AsRef<Path>>(path: P) -> Result<bool> {
 /// assert!(!is_text(binary_data).unwrap());
 /// ```
 pub fn is_text<R: Read>(mut reader: R) -> Result<bool> {
+    // Compile-time lookup table: true for bytes that are valid in text files.
+    // Covers ASCII printable (0x20..0x7F), extended ASCII (0x80..=0xFF),
+    // and common control chars (BEL, BS, TAB, LF, VT, FF, CR, ESC).
+    const TEXT_BYTES: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = 0x20;
+        while i < 0x7F {
+            table[i] = true;
+            i += 1;
+        }
+        let mut i = 0x80;
+        while i < 256 {
+            table[i] = true;
+            i += 1;
+        }
+        table[7] = true;
+        table[8] = true;
+        table[9] = true;
+        table[10] = true;
+        table[11] = true;
+        table[12] = true;
+        table[13] = true;
+        table[27] = true;
+        table
+    };
+
     let mut buffer = [0; 1024];
     let bytes_read = reader.read(&mut buffer)?;
 
-    // Check for null bytes or other non-text indicators
-    let text_chars: HashSet<u8> = [
-        7, 8, 9, 10, 11, 12, 13, 27, // Control chars
-    ]
-    .iter()
-    .cloned()
-    .chain(0x20..0x7F) // ASCII printable
-    .chain(0x80..=0xFF) // Extended ASCII
-    .collect();
-
-    let is_text = buffer[..bytes_read]
-        .iter()
-        .all(|&byte| text_chars.contains(&byte));
-    Ok(is_text)
+    Ok(buffer[..bytes_read].iter().all(|&b| TEXT_BYTES[b as usize]))
 }
 
 /// Parse shebang line from an executable file and return raw shebang components.
@@ -1388,5 +1569,165 @@ mod tests {
                 Err(_) => (), // I/O errors are acceptable for invalid data
             }
         }
+    }
+
+    // Tests for tags_from_info (I/O-free API)
+
+    #[test]
+    fn test_tags_from_info_regular_file() {
+        let info = FileInfo {
+            filename: "script.py",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: Some(b"print('hello')"),
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("file"));
+        assert!(tags.contains("non-executable"));
+        assert!(tags.contains("python"));
+        assert!(tags.contains("text"));
+    }
+
+    #[test]
+    fn test_tags_from_info_directory() {
+        let info = FileInfo {
+            filename: "src",
+            file_kind: FileKind::Directory,
+            is_executable: false,
+            content: None,
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("directory"));
+        assert_eq!(tags.len(), 1);
+    }
+
+    #[test]
+    fn test_tags_from_info_symlink() {
+        let info = FileInfo {
+            filename: "link",
+            file_kind: FileKind::Symlink,
+            is_executable: false,
+            content: None,
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("symlink"));
+        assert_eq!(tags.len(), 1);
+    }
+
+    #[test]
+    fn test_tags_from_info_socket() {
+        let info = FileInfo {
+            filename: "sock",
+            file_kind: FileKind::Socket,
+            is_executable: false,
+            content: None,
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("socket"));
+        assert_eq!(tags.len(), 1);
+    }
+
+    #[test]
+    fn test_tags_from_info_executable_with_shebang() {
+        let info = FileInfo {
+            filename: "my-script",
+            file_kind: FileKind::Regular,
+            is_executable: true,
+            content: Some(b"#!/usr/bin/env python3\nprint('hello')"),
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("file"));
+        assert!(tags.contains("executable"));
+        assert!(tags.contains("python"));
+        assert!(tags.contains("python3"));
+        assert!(tags.contains("text"));
+    }
+
+    #[test]
+    fn test_tags_from_info_binary_content() {
+        let info = FileInfo {
+            filename: "data.bin",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: Some(&[0x7f, 0x45, 0x4c, 0x46, 0x00]),
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("file"));
+        assert!(tags.contains("binary"));
+    }
+
+    #[test]
+    fn test_tags_from_info_no_content() {
+        let info = FileInfo {
+            filename: "unknown",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: None,
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("file"));
+        assert!(tags.contains("non-executable"));
+        // No encoding tag since no content was provided
+        assert!(!tags.contains("text"));
+        assert!(!tags.contains("binary"));
+    }
+
+    #[test]
+    fn test_tags_from_info_extension_provides_encoding() {
+        let info = FileInfo {
+            filename: "app.js",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: None,
+        };
+        let tags = tags_from_info(&info);
+        assert!(tags.contains("javascript"));
+        assert!(tags.contains("text"));
+    }
+
+    #[test]
+    fn test_identify_from_with_custom_extensions() {
+        let mut custom = std::collections::HashMap::new();
+        custom.insert("myext".to_string(), HashSet::from(["text", "custom-lang"]));
+
+        let identifier = FileIdentifier::new().with_custom_extensions(custom);
+        let info = FileInfo {
+            filename: "code.myext",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: Some(b"some code"),
+        };
+        let tags = identifier.identify_from(&info);
+        assert!(tags.contains("custom-lang"));
+        assert!(tags.contains("text"));
+    }
+
+    #[test]
+    fn test_identify_from_skip_content() {
+        let identifier = FileIdentifier::new().skip_content_analysis();
+        let info = FileInfo {
+            filename: "unknown",
+            file_kind: FileKind::Regular,
+            is_executable: false,
+            content: Some(b"hello world"),
+        };
+        let tags = identifier.identify_from(&info);
+        assert!(!tags.contains("text"));
+        assert!(!tags.contains("binary"));
+    }
+
+    #[test]
+    fn test_identify_from_skip_shebang() {
+        let identifier = FileIdentifier::new().skip_shebang_analysis();
+        let info = FileInfo {
+            filename: "my-script",
+            file_kind: FileKind::Regular,
+            is_executable: true,
+            content: Some(b"#!/usr/bin/env python3\nprint('hello')"),
+        };
+        let tags = identifier.identify_from(&info);
+        assert!(!tags.contains("python"));
+        // Still detects text encoding
+        assert!(tags.contains("text"));
     }
 }

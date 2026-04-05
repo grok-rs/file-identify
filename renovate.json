@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits"
+  ],
+  "labels": ["dependencies"],
+  "cargo": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "groupName": "rust minor/patch updates"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "groupName": "github actions updates"
+    }
+  ]
+}

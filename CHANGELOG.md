@@ -70,4 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container formats: Docker, Podman, etc.
 - And 300+ more file types and extensions
 
-[0.1.0]: https://github.com/pre-commit/identify/releases/tag/v0.1.0
+[Unreleased]: https://github.com/grok-rs/file-identify/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/grok-rs/file-identify/releases/tag/v0.2.0
+[0.1.1]: https://github.com/grok-rs/file-identify/releases/tag/v0.1.1
+[0.1.0]: https://github.com/grok-rs/file-identify/releases/tag/v0.1.0
