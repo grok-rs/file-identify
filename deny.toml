@@ -2,25 +2,19 @@
 
 [graph]
 targets = [
-    { triple = "x86_64-unknown-linux-gnu" },
-    { triple = "aarch64-apple-darwin" },
-    { triple = "x86_64-pc-windows-msvc" },
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
 ]
 
-[output]
-feature-depth = 1
-
 [advisories]
-db-path = "~/.cargo/advisory-dbs"
-db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
-yanked = "warn"
 ignore = [
     #"RUSTSEC-0000-0000",
 ]
 
 [licenses]
-unlicensed = "deny"
+confidence-threshold = 0.8
 allow = [
     "MIT",
     "Apache-2.0",
@@ -29,35 +23,19 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
 ]
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-1.0",
-    "AGPL-3.0",
-]
-copyleft = "warn"
-allow-osi-fsf-free = "neither"
-default = "deny"
-confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
-highlight = "all"
-workspace-default-features = "allow"
-external-default-features = "allow"
-allow = [
-    #{ name = "openssl-sys", version = "=0.9.67" },
-]
+wildcards = "deny"
 deny = [
-    # Deny old versions with known vulnerabilities
-    { name = "openssl", version = "<0.10.55" },
-    { name = "openssl-sys", version = "<0.9.87" },
+    { crate = "openssl", use-instead = "rustls" },
+    { crate = "openssl-sys", use-instead = "rustls" },
 ]
 
 [sources]
-unknown-registry = "warn"
-unknown-git = "warn"
+unknown-registry = "deny"
+unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
